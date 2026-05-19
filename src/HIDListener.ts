@@ -17,10 +17,16 @@ export class HIDListener {
     this.callback = callback;
   }
 
-  start(scanIntervalMs = 1000): void {
+  // Default is intentionally slow: HID.devices() walks every HID endpoint on
+  // the system and on Windows it can stall for hundreds of ms even via the
+  // async API. Once a device is open we only need this for hot-plug, so 5s
+  // is plenty. Was 1000ms — caused a periodic ~1Hz stutter in the WebRTC
+  // stream because each scan briefly stole the libuv thread that handles
+  // node-hid reads.
+  start(scanIntervalMs = 5000): void {
     if (this.scanTimer !== null) return;
-    this.scan();
-    this.scanTimer = setInterval(() => this.scan(), scanIntervalMs);
+    void this.scan();
+    this.scanTimer = setInterval(() => void this.scan(), scanIntervalMs);
   }
 
   stop(): void {
@@ -34,27 +40,36 @@ export class HIDListener {
     this.open.clear();
   }
 
-  private scan(): void {
-    const devices = HID.devices().filter(
-      (d) =>
-        d.vendorId === VENDOR_ID &&
-        d.productId !== undefined &&
-        MATCHING_PRODUCT_IDS.has(d.productId),
-    );
+  private scanning = false;
 
-    const seenPaths = new Set<string>();
-    for (const info of devices) {
-      if (!info.path) continue;
-      seenPaths.add(info.path);
-      if (this.open.has(info.path)) continue;
-      this.openDevice(info);
-    }
+  private async scan(): Promise<void> {
+    if (this.scanning) return;
+    this.scanning = true;
+    try {
+      const all = await HID.devicesAsync();
+      const devices = all.filter(
+        (d) =>
+          d.vendorId === VENDOR_ID &&
+          d.productId !== undefined &&
+          MATCHING_PRODUCT_IDS.has(d.productId),
+      );
 
-    for (const path of [...this.open.keys()]) {
-      if (!seenPaths.has(path)) {
-        this.open.get(path)?.close();
-        this.open.delete(path);
+      const seenPaths = new Set<string>();
+      for (const info of devices) {
+        if (!info.path) continue;
+        seenPaths.add(info.path);
+        if (this.open.has(info.path)) continue;
+        this.openDevice(info);
       }
+
+      for (const path of [...this.open.keys()]) {
+        if (!seenPaths.has(path)) {
+          this.open.get(path)?.close();
+          this.open.delete(path);
+        }
+      }
+    } finally {
+      this.scanning = false;
     }
   }
 
