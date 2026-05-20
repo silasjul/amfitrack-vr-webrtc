@@ -13,8 +13,8 @@ const CERT_DIR = path.resolve(__dirname, "../certificates");
 
 const server = https.createServer(
   {
-    cert: fs.readFileSync(path.join(CERT_DIR, "10.0.8.64.pem")),
-    key: fs.readFileSync(path.join(CERT_DIR, "10.0.8.64-key.pem")),
+    cert: fs.readFileSync(path.join(CERT_DIR, "192.168.137.1.pem")),
+    key: fs.readFileSync(path.join(CERT_DIR, "192.168.137.1-key.pem")),
   },
   (req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -76,7 +76,7 @@ const listener = new HIDListener((data) => {
 listener.start();
 
 server.listen(PORT, HOST, () => {
-  console.log(`WebRTC signaling server listening on https://10.0.8.64:${PORT}`);
+  console.log(`WebRTC signaling server listening on https://192.168.137.1:${PORT}`);
 });
 
 const shutdown = (): void => {
