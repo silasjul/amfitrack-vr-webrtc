@@ -7,8 +7,8 @@ import { HIDListener } from "./HIDListener";
 
 const { RTCPeerConnection } = wrtc;
 
-const PORT = Number(process.env["PORT"] ?? 8080);
-const HOST = process.env["HOST"] ?? "0.0.0.0";
+const PORT = 8080;
+const HOST = "192.168.137.1";
 const CERT_DIR = path.resolve(__dirname, "../certificates");
 
 // HID -> data channels: every open channel gets every HID frame. The protocol
