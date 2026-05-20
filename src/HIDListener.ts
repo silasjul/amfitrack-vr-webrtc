@@ -40,6 +40,30 @@ export class HIDListener {
     this.open.clear();
   }
 
+  // Send a packet to every open Amfitrack HID device. Mirrors the read-side
+  // fanout: the protocol packet (in `bytes`) carries its own routing info,
+  // so we broadcast and let firmware ignore packets not addressed to it.
+  // Layout matches what the browser SDK's HIDConnection produces: byte 0 is
+  // the HID report ID (0x01), bytes 1..64 are the report payload.
+  write(bytes: Uint8Array): void {
+    const REPORT_ID = 0x01;
+    const REPORT_SIZE = 64;
+    const report = new Array<number>(REPORT_SIZE).fill(0);
+    report[0] = REPORT_ID;
+    const payloadLen = Math.min(bytes.length, REPORT_SIZE - 1);
+    for (let i = 0; i < payloadLen; i++) report[i + 1] = bytes[i]!;
+
+    for (const [path, device] of this.open) {
+      try {
+        device.write(report);
+      } catch {
+        // Device likely just unplugged — drop it; next scan will reopen.
+        try { device.close(); } catch { /* ignore */ }
+        this.open.delete(path);
+      }
+    }
+  }
+
   private scanning = false;
 
   private async scan(): Promise<void> {

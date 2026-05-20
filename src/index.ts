@@ -39,6 +39,16 @@ wss.on("connection", (signal) => {
     channel.onopen = () => channels.add(channel);
     channel.onclose = () => channels.delete(channel);
     channel.onerror = () => channels.delete(channel);
+    channel.onmessage = (ev) => {
+      let bytes: Uint8Array | null = null;
+      if (ev.data instanceof ArrayBuffer) {
+        bytes = new Uint8Array(ev.data);
+      } else if (ArrayBuffer.isView(ev.data)) {
+        const view = ev.data as ArrayBufferView;
+        bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+      }
+      if (bytes && bytes.length > 0) listener.write(bytes);
+    };
   };
 
   signal.on("message", async (raw) => {
