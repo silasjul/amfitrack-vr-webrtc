@@ -11,19 +11,29 @@ const PORT = Number(process.env["PORT"] ?? 8080);
 const HOST = process.env["HOST"] ?? "0.0.0.0";
 const CERT_DIR = path.resolve(__dirname, "../certificates");
 
+// HID -> data channels: every open channel gets every HID frame. The protocol
+// packet carries its own routing info so we broadcast and let the SDK filter.
+// Strip byte 0 (node-hid prepends the HID report ID) so the wire format
+// matches what the browser SDK's decoder expects from a WebHID buffer.
+const channels = new Set<RTCDataChannel>();
+const listener = new HIDListener((data) => {
+  if (data.length === 0) return;
+  const packet = Uint8Array.from(data.subarray(1));
+  for (const ch of channels) {
+    if (ch.readyState === "open") ch.send(packet);
+  }
+});
+
 const server = https.createServer(
   {
     cert: fs.readFileSync(path.join(CERT_DIR, "192.168.137.1.pem")),
     key: fs.readFileSync(path.join(CERT_DIR, "192.168.137.1-key.pem")),
   },
-  (req, res) => {
+  (_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", path: req.url }));
-  }
+    res.end(JSON.stringify({ status: "ok" }));
+  },
 );
-
-// Active data channels to fan HID packets out to.
-const channels = new Set<RTCDataChannel>();
 
 const wss = new WebSocketServer({ server, perMessageDeflate: false });
 
@@ -31,7 +41,9 @@ wss.on("connection", (signal) => {
   const pc = new RTCPeerConnection({ iceServers: [] });
 
   pc.onicecandidate = ({ candidate }) => {
-    if (candidate) signal.send(JSON.stringify({ type: "ice", candidate }));
+    if (candidate && signal.readyState === signal.OPEN) {
+      signal.send(JSON.stringify({ type: "ice", candidate }));
+    }
   };
 
   pc.ondatachannel = ({ channel }) => {
@@ -40,14 +52,8 @@ wss.on("connection", (signal) => {
     channel.onclose = () => channels.delete(channel);
     channel.onerror = () => channels.delete(channel);
     channel.onmessage = (ev) => {
-      let bytes: Uint8Array | null = null;
-      if (ev.data instanceof ArrayBuffer) {
-        bytes = new Uint8Array(ev.data);
-      } else if (ArrayBuffer.isView(ev.data)) {
-        const view = ev.data as ArrayBufferView;
-        bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-      }
-      if (bytes && bytes.length > 0) listener.write(bytes);
+      const bytes = new Uint8Array(ev.data as ArrayBuffer);
+      if (bytes.length > 0) listener.write(bytes);
     };
   };
 
@@ -70,23 +76,9 @@ wss.on("connection", (signal) => {
   signal.on("close", () => pc.close());
 });
 
-const listener = new HIDListener((data) => {
-  // node-hid prepends the HID report ID as byte 0 for devices that use one
-  // (amfitrack uses different IDs per report type — e.g. 0x02 for source
-  // input). Strip it so the wire format matches what the browser SDK's
-  // decoder expects (it slices subarray(1, 8) for the header, which assumes
-  // byte 0 is a non-packet prefix that came from a fresh, no-report-ID
-  // WebHID buffer).
-  const frame = data.length > 0 ? data.subarray(1) : data;
-  const packet = Uint8Array.from(frame);
-  for (const ch of channels) {
-    if (ch.readyState === "open") ch.send(packet);
-  }
-});
 listener.start();
-
 server.listen(PORT, HOST, () => {
-  console.log(`WebRTC signaling server listening on https://192.168.137.1:${PORT}`);
+  console.log(`WebRTC signaling server listening on https://${HOST}:${PORT}`);
 });
 
 const shutdown = (): void => {
