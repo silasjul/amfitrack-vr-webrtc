@@ -1,5 +1,6 @@
 import https from "node:https";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import wrtc from "@roamhq/wrtc";
@@ -8,7 +9,7 @@ import { HIDListener } from "./HIDListener";
 const { RTCPeerConnection } = wrtc;
 
 const PORT = 8080;
-const HOST = "192.168.137.1";
+const HOST = "0.0.0.0";
 const CERT_DIR = path.resolve(__dirname, "../certificates");
 
 // HID -> data channels: every open channel gets every HID frame. The protocol
@@ -64,7 +65,9 @@ wss.on("connection", (signal) => {
         await pc.setRemoteDescription(msg.sdp);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        signal.send(JSON.stringify({ type: "answer", sdp: pc.localDescription }));
+        signal.send(
+          JSON.stringify({ type: "answer", sdp: pc.localDescription }),
+        );
       } else if (msg.type === "ice" && msg.candidate) {
         await pc.addIceCandidate(msg.candidate);
       }
@@ -78,7 +81,17 @@ wss.on("connection", (signal) => {
 
 listener.start();
 server.listen(PORT, HOST, () => {
-  console.log(`WebRTC signaling server listening on https://${HOST}:${PORT}`);
+  const addrs = Object.values(os.networkInterfaces())
+    .flat()
+    .filter(
+      (i): i is os.NetworkInterfaceInfo =>
+        !!i && i.family === "IPv4" && !i.internal,
+    )
+    .map((i) => i.address);
+  console.log(
+    `WebRTC signaling server listening on port ${PORT}. Reachable at:`,
+  );
+  for (const a of addrs) console.log(`  https://${a}:${PORT}`);
 });
 
 const shutdown = (): void => {
